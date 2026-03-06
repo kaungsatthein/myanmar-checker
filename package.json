@@ -1,0 +1,31 @@
+{
+  "name": "myanmar-checker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n WEB,SOCKET -c cyan,magenta \"npm run dev:web\" \"npm run dev:socket\"",
+    "dev:web": "NEXT_PUBLIC_SOCKET_URL=http://localhost:4001 next dev -p 5178",
+    "dev:socket": "node -r tsx/cjs socket-server/index.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production node -r tsx/cjs server.ts",
+    "start:socket": "node -r tsx/cjs socket-server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@next/env": "^15.5.12",
+    "next": "^15.5.12",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "socket.io": "4.8.1",
+    "socket.io-client": "4.8.1",
+    "tsx": "4.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.14.0",
+    "@types/react": "19.0.12",
+    "@types/react-dom": "19.0.5",
+    "concurrently": "^9.2.1",
+    "typescript": "5.8.2"
+  }
+}
