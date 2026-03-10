@@ -1,6 +1,6 @@
 "use client";
 
-import { GameState, Move, Role } from "../shared/types";
+import { Color, GameState, Move, Role } from "../shared/types";
 
 type BoardProps = {
   state: GameState;
@@ -17,6 +17,14 @@ function squareKey(row: number, col: number): string {
   return `${row}-${col}`;
 }
 
+function mapColorForViewer(color: Color, role: Role): Color {
+  if (role !== "RED" && role !== "BLACK") {
+    return color;
+  }
+
+  return color === role ? "BLACK" : "RED";
+}
+
 export function Board({
   state,
   myRole,
@@ -27,6 +35,15 @@ export function Board({
   onPieceSelect,
   onMoveSelect
 }: BoardProps) {
+  const boardSize = state.board.length;
+  const shouldFlipBoard = myRole === "RED";
+  const rowOrder = Array.from({ length: boardSize }, (_, index) =>
+    shouldFlipBoard ? boardSize - 1 - index : index
+  );
+  const colOrder = Array.from({ length: boardSize }, (_, index) =>
+    shouldFlipBoard ? boardSize - 1 - index : index
+  );
+
   const moveTargets = new Map<string, Move>();
   for (const move of legalMoves) {
     moveTargets.set(squareKey(move.to.r, move.to.c), move);
@@ -37,10 +54,12 @@ export function Board({
   return (
     <div className="board-wrap">
       <div className="board" role="grid" aria-label="Myanmar checkers board">
-        {state.board.map((row, rowIndex) =>
-          row.map((pieceId, colIndex) => {
+        {rowOrder.map((rowIndex, visualRowIndex) =>
+          colOrder.map((colIndex, visualColIndex) => {
             const cellKey = squareKey(rowIndex, colIndex);
+            const pieceId = state.board[rowIndex][colIndex];
             const piece = pieceId ? state.pieces[pieceId] : undefined;
+            const displayColor = piece ? mapColorForViewer(piece.color, myRole) : undefined;
             const isDark = (rowIndex + colIndex) % 2 === 1;
             const targetMove = moveTargets.get(cellKey);
             const hasCapture = Boolean(targetMove && targetMove.captures.length > 0);
@@ -84,19 +103,19 @@ export function Board({
                   .join(" ")}
                 onClick={onClick}
                 disabled={!canInteract && !targetMove}
-                aria-label={`row ${rowIndex + 1}, column ${colIndex + 1}`}
+                aria-label={`row ${visualRowIndex + 1}, column ${visualColIndex + 1}`}
               >
                 {piece ? (
                   <span
                     className={[
                       "piece",
-                      piece.color === "RED" ? "piece-red" : "piece-black",
+                      displayColor === "RED" ? "piece-red" : "piece-black",
                       piece.isKing ? "piece-king-piece" : "",
                       isLastTo ? "piece-last-moved" : ""
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    aria-label={piece.isKing ? `${piece.color} king` : piece.color}
+                    aria-label={piece.isKing ? `${displayColor} king` : displayColor}
                   >
                     {piece.isKing ? (
                       <span className="piece-crown" aria-hidden="true">

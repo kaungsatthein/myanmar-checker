@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Board } from "./Board";
 import { getSocket } from "../lib/socket";
 import {
   createInitialGameState,
   getLegalMovesForPiece,
+  otherColor,
 } from "../shared/engine";
 import {
   AIDifficulty,
@@ -30,36 +31,42 @@ type RoomGameClientProps = {
   aiDifficulty: AIDifficulty;
 };
 
-type MoveEntry = {
-  id: string;
-  by: Color;
-  move: Move;
-};
-
 const STARTING_PIECES_PER_SIDE = 12;
 
 function getConnectionLabel(connected: boolean): string {
   return connected ? "Connected" : "Disconnected";
 }
 
-function getTurnLabel(state: GameState | null, role: Role): string {
+function mapColorForViewer(color: Color, viewerRole: Role): Color {
+  if (viewerRole !== "RED" && viewerRole !== "BLACK") {
+    return color;
+  }
+
+  return color === viewerRole ? "BLACK" : "RED";
+}
+
+function mapRoleForViewer(role: Role): Role {
+  if (role !== "RED" && role !== "BLACK") {
+    return role;
+  }
+
+  return "BLACK";
+}
+
+function getTurnLabel(state: GameState | null, viewerRole: Role): string {
   if (!state) {
     return "Waiting for game state";
   }
 
   if (state.winner) {
-    if (role === state.winner) {
-      return "You won";
-    }
-
-    return `Winner: ${state.winner}`;
+    return "Match ended";
   }
 
   if (state.forcedPieceId) {
-    return `${state.turn} turn (must continue capture)`;
+    return `${mapColorForViewer(state.turn, viewerRole)} turn (must continue capture)`;
   }
 
-  return `${state.turn} turn`;
+  return `${mapColorForViewer(state.turn, viewerRole)} turn`;
 }
 
 function countPieces(state: GameState | null, color: Color): number {
@@ -93,11 +100,6 @@ function formatCoord(coord: { r: number; c: number }): string {
   return `${file}${rank}`;
 }
 
-function formatMoveText(entry: MoveEntry): string {
-  const action = entry.move.captures.length > 0 ? "captures" : "moves";
-  return `${entry.by} ${action} ${formatCoord(entry.move.from)} -> ${formatCoord(entry.move.to)}`;
-}
-
 function formatTimeLeft(milliseconds: number): string {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -105,12 +107,12 @@ function formatTimeLeft(milliseconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function getInGameStatusLabel(state: GameState): string {
+function getInGameStatusLabel(state: GameState, viewerRole: Role): string {
   if (state.forcedPieceId) {
-    return `${state.turn} turn (must continue capture)`;
+    return `${mapColorForViewer(state.turn, viewerRole)} turn (must continue capture)`;
   }
 
-  return `${state.turn} turn`;
+  return `${mapColorForViewer(state.turn, viewerRole)} turn`;
 }
 
 export function RoomGameClient({
@@ -130,16 +132,18 @@ export function RoomGameClient({
   const [statusMessage, setStatusMessage] = useState<string>("Joining room...");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [lastMove, setLastMove] = useState<Move | undefined>(undefined);
-  const [moveHistory, setMoveHistory] = useState<MoveEntry[]>([]);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [showWinnerDialog, setShowWinnerDialog] = useState(false);
   const [winnerDialogText, setWinnerDialogText] = useState("");
-  const [winnerDialogKey, setWinnerDialogKey] = useState<string | undefined>(
-    undefined,
-  );
+  const [showResignDialog, setShowResignDialog] = useState(false);
+  const [hasSeenPlayableState, setHasSeenPlayableState] = useState(false);
+  const roleRef = useRef<Role>("SPECTATOR");
+  const previousWinnerRef = useRef<Color | undefined>(undefined);
 
-  const isPlayer = role === "RED" || role === "BLACK";
-  const isMyTurn = isPlayer && state.turn === role && !state.winner;
+  const playerColor = role === "RED" || role === "BLACK" ? role : null;
+  const isPlayer = playerColor !== null;
+  const isMyTurn =
+    playerColor !== null && state.turn === playerColor && !state.winner;
 
   const legalMoves: Move[] = useMemo(() => {
     if (!selectedPieceId) {
@@ -152,11 +156,14 @@ export function RoomGameClient({
   useEffect(() => {
     setState(createInitialGameState(roomId));
     setHasServerState(false);
+    setRole("SPECTATOR");
+    roleRef.current = "SPECTATOR";
     setLastMove(undefined);
-    setMoveHistory([]);
     setShowWinnerDialog(false);
     setWinnerDialogText("");
-    setWinnerDialogKey(undefined);
+    setShowResignDialog(false);
+    setHasSeenPlayableState(false);
+    previousWinnerRef.current = undefined;
   }, [roomId]);
 
   useEffect(() => {
@@ -192,6 +199,7 @@ export function RoomGameClient({
     };
 
     const handleJoined = (payload: JoinRoomResult) => {
+      roleRef.current = payload.role;
       setRole(payload.role);
       setIsHost(payload.isHost);
 
@@ -200,7 +208,7 @@ export function RoomGameClient({
           "Joined as spectator. Both player seats are occupied.",
         );
       } else {
-        setStatusMessage(`Joined as ${payload.role}.`);
+        setStatusMessage(`Joined as ${mapRoleForViewer(payload.role)}.`);
       }
     };
 
@@ -208,8 +216,13 @@ export function RoomGameClient({
       setState(incoming);
       setHasServerState(true);
       setErrorMessage("");
+
+      if (incoming.players.RED && incoming.players.BLACK && !incoming.winner) {
+        setHasSeenPlayableState(true);
+      }
+
       if (!incoming.winner) {
-        setStatusMessage(getInGameStatusLabel(incoming));
+        setStatusMessage(getInGameStatusLabel(incoming, roleRef.current));
       }
     };
 
@@ -218,7 +231,9 @@ export function RoomGameClient({
     };
 
     const handleRestartVote = (payload: RestartVotePayload) => {
-      const votes = payload.votes.join(" + ");
+      const votes = payload.votes
+        .map((vote) => mapColorForViewer(vote, roleRef.current))
+        .join(" + ");
       setStatusMessage(`Restart vote pending: ${votes}`);
     };
 
@@ -234,38 +249,33 @@ export function RoomGameClient({
       setStatusMessage(text);
       setSelectedPieceId(undefined);
       setLastMove(undefined);
-      setMoveHistory([]);
       setShowWinnerDialog(false);
       setWinnerDialogText("");
-      setWinnerDialogKey(undefined);
+      setShowResignDialog(false);
+      previousWinnerRef.current = undefined;
     };
 
     const handleMoveAccepted = (payload: MoveAcceptPayload) => {
       setLastMove(payload.move);
-      setMoveHistory((previous) => {
-        const next: MoveEntry = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          by: payload.by,
-          move: payload.move,
-        };
-
-        return [...previous.slice(-19), next];
-      });
       setErrorMessage("");
       setSelectedPieceId(undefined);
       setStatusMessage(
-        `${payload.by} moved: ${formatCoord(payload.move.from)} -> ${formatCoord(payload.move.to)}`,
+        `${mapColorForViewer(payload.by, roleRef.current)} moved: ${formatCoord(payload.move.from)} -> ${formatCoord(payload.move.to)}`,
       );
     };
 
     const handleTimeout = (payload: GameTimeoutPayload) => {
+      setShowResignDialog(false);
       setStatusMessage(
-        `${payload.loser} ran out of time. ${payload.winner} wins.`,
+        `${mapColorForViewer(payload.loser, roleRef.current)} ran out of time. ${mapColorForViewer(payload.winner, roleRef.current)} wins.`,
       );
     };
 
     const handleResigned = (payload: GameResignedPayload) => {
-      setStatusMessage(`${payload.loser} resigned. ${payload.winner} wins.`);
+      setShowResignDialog(false);
+      setStatusMessage(
+        `${mapColorForViewer(payload.loser, roleRef.current)} resigned. ${mapColorForViewer(payload.winner, roleRef.current)} wins.`,
+      );
     };
 
     socket.on("connect", handleConnect);
@@ -330,33 +340,49 @@ export function RoomGameClient({
 
   useEffect(() => {
     if (!state.winner) {
-      setWinnerDialogKey(undefined);
+      previousWinnerRef.current = undefined;
+      return;
+    }
+
+    if (previousWinnerRef.current === state.winner) {
+      return;
+    }
+    previousWinnerRef.current = state.winner;
+
+    if (!hasSeenPlayableState) {
       return;
     }
 
     if (role === state.winner) {
       setStatusMessage("You won this match.");
-      setShowWinnerDialog(false);
-      setWinnerDialogText("");
-      return;
+      setWinnerDialogText("Congratulations! You won this match.");
+    } else if (isPlayer) {
+      const winnerLabel = mapColorForViewer(state.winner, role);
+      setStatusMessage(`${winnerLabel} won this match.`);
+      setWinnerDialogText(`${winnerLabel} wins this match.`);
+    } else {
+      const winnerLabel = mapColorForViewer(state.winner, role);
+      setStatusMessage(`${winnerLabel} won this match.`);
+      setWinnerDialogText(`Match finished. ${winnerLabel} wins.`);
     }
 
-    setStatusMessage(`${state.winner} won this match.`);
-    const key = `${roomId}-${state.winner}`;
-    if (winnerDialogKey === key) {
-      return;
-    }
-
-    setWinnerDialogKey(key);
-    setWinnerDialogText(`Congratulations ${state.winner}!`);
+    setShowResignDialog(false);
     setShowWinnerDialog(true);
-  }, [role, roomId, state.winner, winnerDialogKey]);
+  }, [hasSeenPlayableState, isPlayer, role, state.winner]);
 
   const redLeft = countPieces(state, "RED");
   const blackLeft = countPieces(state, "BLACK");
 
   const redCaptured = Math.max(0, STARTING_PIECES_PER_SIDE - blackLeft);
   const blackCaptured = Math.max(0, STARTING_PIECES_PER_SIDE - redLeft);
+  const blackSideActualColor: Color = playerColor ?? "BLACK";
+  const redSideActualColor: Color = playerColor
+    ? otherColor(playerColor)
+    : "RED";
+  const capturedByActualColor: Record<Color, number> = {
+    RED: redCaptured,
+    BLACK: blackCaptured,
+  };
   const hasAIPlayer = Boolean(
     state.players.RED?.isAI || state.players.BLACK?.isAI,
   );
@@ -375,7 +401,7 @@ export function RoomGameClient({
   const loseStatus = !isPlayer
     ? "N/A"
     : state.winner
-      ? state.winner === role
+      ? state.winner === playerColor
         ? "No"
         : "Yes"
       : "Yes";
@@ -386,7 +412,7 @@ export function RoomGameClient({
     }
 
     const piece = state.pieces[pieceId];
-    if (!piece || piece.color !== role) {
+    if (!piece || !playerColor || piece.color !== playerColor) {
       return;
     }
 
@@ -429,125 +455,156 @@ export function RoomGameClient({
       return;
     }
 
-    const confirmed = window.confirm("Resign this match and lose immediately?");
-    if (!confirmed) {
+    setShowResignDialog(true);
+  };
+
+  const onCancelResign = () => {
+    setShowResignDialog(false);
+  };
+
+  const onConfirmResign = () => {
+    if (!isPlayer || state.winner) {
+      setShowResignDialog(false);
       return;
     }
 
     const socket = getSocket();
     socket.emit("game:resign", { roomId });
+    setShowResignDialog(false);
   };
 
   const restartEnabled = isHost || isPlayer;
   const resignEnabled = isPlayer && !state.winner && hasServerState;
+  const forcedPiece = state.forcedPieceId
+    ? state.pieces[state.forcedPieceId]
+    : undefined;
+  const forcedMoveHint = forcedPiece
+    ? `You must continue with ${mapColorForViewer(forcedPiece.color, role)} at ${formatCoord({ r: forcedPiece.row, c: forcedPiece.col })}.`
+    : "Select one of your pieces and move to a highlighted legal square.";
 
   return (
     <main className="game-shell">
       <header className="game-header">
         <div className="header-title">
           <h1>Myanmar Checker</h1>
-          <p>
+          {/* <p>
             Room <strong>{roomId}</strong>
-          </p>
-        </div>
-
-        <div className="chip-row">
-          <div className="stat-chip">
-            <span className="chip-label">You</span>
-            <span className="chip-value">{role}</span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Connection</span>
-            <span className={connected ? "chip-value ok" : "chip-value warn"}>
-              {getConnectionLabel(connected)}
-            </span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Turn</span>
-            <span className="chip-value">{getTurnLabel(state, role)}</span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Host</span>
-            <span className="chip-value">{isHost ? "Yes" : "No"}</span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Mode</span>
-            <span className="chip-value">
-              {hasAIPlayer
-                ? `Multiplayer + AI (${formatAIDifficultyLabel(aiLabel)})`
-                : "Multiplayer"}
-            </span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Turn Time</span>
-            <span className={timerCritical ? "chip-value warn" : "chip-value"}>
-              {timeLabel}
-            </span>
-          </div>
-          <div className="stat-chip">
-            <span className="chip-label">Can Lose</span>
-            <span className="chip-value">{loseStatus}</span>
-          </div>
+          </p> */}
         </div>
       </header>
 
-      <section className="score-strip">
-        <article className="score-card score-red">
-          <h2>Red</h2>
-          <p>{formatPlayerName(state?.players.RED)}</p>
-          <p>Captured {redCaptured}</p>
-        </article>
-        <article className="score-card score-black">
-          <h2>Black</h2>
-          <p>{formatPlayerName(state?.players.BLACK)}</p>
-          <p>Captured {blackCaptured}</p>
-        </article>
-        <div className="action-stack">
-          <button
-            type="button"
-            className="restart-btn"
-            onClick={onRestartClick}
-            disabled={!restartEnabled}
+      {/* <p className="status-line">{statusMessage}</p> */}
+
+      <section className="game-main">
+        <Board
+          state={state}
+          myRole={role}
+          canInteract={isMyTurn && hasServerState}
+          selectedPieceId={selectedPieceId}
+          lastMove={lastMove}
+          legalMoves={legalMoves}
+          onPieceSelect={onPieceSelect}
+          onMoveSelect={onMoveSelect}
+        />
+
+        <aside className="stat-sidebar" aria-label="Room status">
+          <div className="chip-column">
+            <div className="stat-chip">
+              <span className="chip-label">You</span>
+              <span className="chip-value">{mapRoleForViewer(role)}</span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Connection</span>
+              <span className={connected ? "chip-value ok" : "chip-value warn"}>
+                {getConnectionLabel(connected)}
+              </span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Turn</span>
+              <span className="chip-value">{getTurnLabel(state, role)}</span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Host</span>
+              <span className="chip-value">{isHost ? "Yes" : "No"}</span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Mode</span>
+              <span className="chip-value">
+                {hasAIPlayer
+                  ? `Multiplayer + AI (${formatAIDifficultyLabel(aiLabel)})`
+                  : "Multiplayer"}
+              </span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Turn Time</span>
+              <span
+                className={timerCritical ? "chip-value warn" : "chip-value"}
+              >
+                {timeLabel}
+              </span>
+            </div>
+            <div className="stat-chip">
+              <span className="chip-label">Can Lose</span>
+              <span className="chip-value">{loseStatus}</span>
+            </div>
+          </div>
+
+          <section className="score-strip">
+            <article className="score-card score-black">
+              <h2>Black</h2>
+              <p>{formatPlayerName(state?.players[blackSideActualColor])}</p>
+              <p>Captured {capturedByActualColor[blackSideActualColor]}</p>
+            </article>
+            <article className="score-card score-red">
+              <h2>Red</h2>
+              <p>{formatPlayerName(state?.players[redSideActualColor])}</p>
+              <p>Captured {capturedByActualColor[redSideActualColor]}</p>
+            </article>
+            <div className="action-stack">
+              <button
+                type="button"
+                className="restart-btn"
+                onClick={onRestartClick}
+                disabled={!restartEnabled}
+              >
+                Restart
+              </button>
+              <button
+                type="button"
+                className="resign-btn"
+                onClick={onResignClick}
+                disabled={!resignEnabled}
+              >
+                Lose Match
+              </button>
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      {errorMessage ? (
+        <div className="winner-dialog-backdrop" role="presentation">
+          <div
+            className="winner-dialog error-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Move error"
           >
-            Restart
-          </button>
-          <button
-            type="button"
-            className="resign-btn"
-            onClick={onResignClick}
-            disabled={!resignEnabled}
-          >
-            Lose Match
-          </button>
+            <h3>Invalid Move</h3>
+            <p>{errorMessage}</p>
+            <p className="error-hint">{forcedMoveHint}</p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => setErrorMessage("")}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
-      </section>
-
-      <p className="status-line">{statusMessage}</p>
-      {errorMessage ? <p className="error-line">{errorMessage}</p> : null}
-
-      <Board
-        state={state}
-        myRole={role}
-        canInteract={isMyTurn && hasServerState}
-        selectedPieceId={selectedPieceId}
-        lastMove={lastMove}
-        legalMoves={legalMoves}
-        onPieceSelect={onPieceSelect}
-        onMoveSelect={onMoveSelect}
-      />
-
-      <section className="move-log">
-        <h3>Move Transactions</h3>
-        {moveHistory.length === 0 ? (
-          <p className="move-log-empty">No moves yet.</p>
-        ) : (
-          <ol>
-            {[...moveHistory].reverse().map((entry) => (
-              <li key={entry.id}>{formatMoveText(entry)}</li>
-            ))}
-          </ol>
-        )}
-      </section>
+      ) : null}
 
       {showWinnerDialog ? (
         <div className="winner-dialog-backdrop" role="presentation">
@@ -566,6 +623,36 @@ export function RoomGameClient({
             >
               OK
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {showResignDialog ? (
+        <div className="winner-dialog-backdrop" role="presentation">
+          <div
+            className="winner-dialog confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm resign"
+          >
+            <h3>Lose This Match?</h3>
+            <p>Resign this match and lose immediately?</p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={onCancelResign}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn confirm-danger-btn"
+                onClick={onConfirmResign}
+              >
+                Confirm Lose
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
