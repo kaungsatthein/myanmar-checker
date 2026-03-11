@@ -35,7 +35,7 @@ type Session = {
 
 const rooms = new Map<string, Room>();
 const sessions = new Map<string, Session>();
-const TURN_DURATION_MS = 30_000;
+const TURN_DURATION_MS = 60_000;
 
 function createRoom(roomId: string, hostSocketId: string): Room {
   const room: Room = {
