@@ -44,7 +44,7 @@ This project provides:
 - AI match mode (`easy`, `medium`, `hard`)
 - Move transaction log in UI
 - Last-move highlight and checker move animation
-- Turn countdown (30s)
+- Turn countdown (60s)
 - Restart system:
   - host can force restart
   - or both players vote

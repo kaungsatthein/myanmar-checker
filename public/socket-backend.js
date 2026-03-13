@@ -24466,7 +24466,7 @@ function tryApplyMove(state, actorColor, payload) {
 // src/server/socket.ts
 var rooms = /* @__PURE__ */ new Map();
 var sessions = /* @__PURE__ */ new Map();
-var TURN_DURATION_MS = 3e4;
+var TURN_DURATION_MS = 6e4;
 function createRoom(roomId, hostSocketId) {
   const room = {
     id: roomId,
