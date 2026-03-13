@@ -2,11 +2,14 @@ import {
   BOARD_SIZE,
   Color,
   Coord,
+  GameResult,
   GameState,
   Move,
   MoveTryPayload,
   Piece
 } from "./types";
+
+const DRAW_MOVE_LIMIT = 10;
 
 const KING_DIRECTIONS: readonly [number, number][] = [
   [1, 1],
@@ -41,6 +44,36 @@ function makeEmptyBoard(): (string | null)[][] {
 
 function shouldPromote(piece: Piece): boolean {
   return (piece.color === "RED" && piece.row === BOARD_SIZE - 1) || (piece.color === "BLACK" && piece.row === 0);
+}
+
+function countPiecesByColor(state: GameState): Record<Color, number> {
+  const counts: Record<Color, number> = {
+    RED: 0,
+    BLACK: 0
+  };
+
+  for (const piece of Object.values(state.pieces)) {
+    counts[piece.color] += 1;
+  }
+
+  return counts;
+}
+
+function isSingleCheckerEndgame(state: GameState): boolean {
+  const counts = countPiecesByColor(state);
+  return counts.RED === 1 && counts.BLACK === 1;
+}
+
+function getNextDrawMoveCounter(previousState: GameState, nextState: GameState, move: Move): number | undefined {
+  if (!isSingleCheckerEndgame(nextState)) {
+    return undefined;
+  }
+
+  if (move.captures.length > 0) {
+    return 0;
+  }
+
+  return isSingleCheckerEndgame(previousState) ? (previousState.drawMoveCounter ?? 0) + 1 : 0;
 }
 
 function getRawMovesForPiece(
@@ -289,34 +322,30 @@ export function applyMove(state: GameState, move: Move): GameState {
     ...state,
     board,
     pieces,
+    drawMoveCounter: move.captures.length > 0 ? undefined : state.drawMoveCounter,
     players: {
       ...state.players
     }
   };
 }
 
-export function evaluateWinner(state: GameState): Color | undefined {
-  let redCount = 0;
-  let blackCount = 0;
+export function evaluateWinner(state: GameState): GameResult | undefined {
+  const counts = countPiecesByColor(state);
 
-  for (const piece of Object.values(state.pieces)) {
-    if (piece.color === "RED") {
-      redCount += 1;
-    } else {
-      blackCount += 1;
-    }
-  }
-
-  if (redCount === 0) {
+  if (counts.RED === 0) {
     return "BLACK";
   }
 
-  if (blackCount === 0) {
+  if (counts.BLACK === 0) {
     return "RED";
   }
 
   if (getAllLegalMoves(state, state.turn).length === 0) {
     return otherColor(state.turn);
+  }
+
+  if (state.drawMoveCounter !== undefined && state.drawMoveCounter >= DRAW_MOVE_LIMIT) {
+    return "DRAW";
   }
 
   return undefined;
@@ -370,6 +399,7 @@ export function tryApplyMove(
   }
 
   let nextState = applyMove(state, selected);
+  const drawMoveCounter = getNextDrawMoveCounter(state, nextState, selected);
 
   if (selected.captures.length > 0) {
     const movedPiece = nextState.pieces[pieceId];
@@ -385,6 +415,7 @@ export function tryApplyMove(
         ...nextState,
         turn: actorColor,
         forcedPieceId: movedPiece.id,
+        drawMoveCounter: undefined,
         winner: undefined
       };
     } else {
@@ -392,6 +423,7 @@ export function tryApplyMove(
         ...nextState,
         turn: otherColor(actorColor),
         forcedPieceId: undefined,
+        drawMoveCounter,
         winner: undefined
       };
     }
@@ -400,6 +432,7 @@ export function tryApplyMove(
       ...nextState,
       turn: otherColor(actorColor),
       forcedPieceId: undefined,
+      drawMoveCounter,
       winner: undefined
     };
   }

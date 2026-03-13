@@ -132,8 +132,14 @@ input {
 
 .room-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
+}
+
+.room-action-btn {
+  min-width: 112px;
+  padding-inline: 16px;
+  white-space: nowrap;
 }
 
 .primary-btn,

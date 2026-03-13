@@ -165,6 +165,10 @@ function getPositionBonus(piece: Piece): number {
 
 function evaluateStateForAI(state: GameState, aiColor: Color): number {
   if (state.winner) {
+    if (state.winner === "DRAW") {
+      return 0;
+    }
+
     return state.winner === aiColor ? 1_000_000 : -1_000_000;
   }
 

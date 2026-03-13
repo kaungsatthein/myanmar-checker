@@ -13,6 +13,7 @@ import {
   AIDifficulty,
   Color,
   GameResignedPayload,
+  GameResult,
   GameTimeoutPayload,
   GameState,
   JoinRoomResult,
@@ -59,7 +60,7 @@ function getTurnLabel(state: GameState | null, viewerRole: Role): string {
   }
 
   if (state.winner) {
-    return "Match ended";
+    return state.winner === "DRAW" ? "Draw" : "Match ended";
   }
 
   if (state.forcedPieceId) {
@@ -138,7 +139,7 @@ export function RoomGameClient({
   const [showResignDialog, setShowResignDialog] = useState(false);
   const [hasSeenPlayableState, setHasSeenPlayableState] = useState(false);
   const roleRef = useRef<Role>("SPECTATOR");
-  const previousWinnerRef = useRef<Color | undefined>(undefined);
+  const previousWinnerRef = useRef<GameResult | undefined>(undefined);
 
   const playerColor = role === "RED" || role === "BLACK" ? role : null;
   const isPlayer = playerColor !== null;
@@ -353,6 +354,14 @@ export function RoomGameClient({
       return;
     }
 
+    if (state.winner === "DRAW") {
+      setStatusMessage("Match ended in a draw.");
+      setWinnerDialogText("Draw. Ten moves passed in the 1 vs 1 endgame without a capture.");
+      setShowResignDialog(false);
+      setShowWinnerDialog(true);
+      return;
+    }
+
     if (role === state.winner) {
       setStatusMessage("You won this match.");
       setWinnerDialogText("Congratulations! You won this match.");
@@ -401,7 +410,9 @@ export function RoomGameClient({
   const loseStatus = !isPlayer
     ? "N/A"
     : state.winner
-      ? state.winner === playerColor
+      ? state.winner === "DRAW"
+        ? "No"
+        : state.winner === playerColor
         ? "No"
         : "Yes"
       : "Yes";

@@ -1,6 +1,7 @@
 export const BOARD_SIZE = 8;
 
 export type Color = "RED" | "BLACK";
+export type GameResult = Color | "DRAW";
 export type Role = Color | "SPECTATOR";
 export type AIDifficulty = "easy" | "medium" | "hard";
 
@@ -39,7 +40,8 @@ export type GameState = {
   turn: Color;
   turnDeadlineAt?: number;
   forcedPieceId?: string;
-  winner?: Color;
+  winner?: GameResult;
+  drawMoveCounter?: number;
   roomId: string;
   players: {
     RED?: Player;

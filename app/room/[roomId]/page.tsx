@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { RoomGameClient } from "../../../src/components/RoomGameClient";
 import type { AIDifficulty } from "../../../src/shared/types";
 
@@ -18,6 +20,32 @@ function parseAIDifficulty(value?: string): AIDifficulty {
   }
 
   return "medium";
+}
+
+export async function generateMetadata({
+  params,
+}: RoomPageProps): Promise<Metadata> {
+  const resolvedParams = await params;
+  const roomId = resolvedParams.roomId.toUpperCase();
+
+  return {
+    title: `Room ${roomId}`,
+    description: `Join Myanmar Checkers room ${roomId} and play a real-time multiplayer match.`,
+    alternates: {
+      canonical: `/room/${roomId}`,
+    },
+    openGraph: {
+      title: `Myanmar Checkers Room ${roomId}`,
+      description: `Join room ${roomId} and start a real-time Myanmar Checkers match.`,
+      url: `/room/${roomId}`,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `Myanmar Checkers Room ${roomId}`,
+      description: `Join room ${roomId} and start a real-time Myanmar Checkers match.`,
+    },
+  };
 }
 
 export default async function RoomPage({ params, searchParams }: RoomPageProps) {

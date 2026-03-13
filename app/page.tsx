@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AIDifficulty } from "../src/shared/types";
 
@@ -14,6 +14,35 @@ export default function HomePage() {
   const [playerName, setPlayerName] = useState<string>("");
   const [playWithAI, setPlayWithAI] = useState<boolean>(false);
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>("medium");
+  const [copyLabel, setCopyLabel] = useState<"Copy" | "Copied">("Copy");
+
+  useEffect(() => {
+    if (copyLabel === "Copy") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCopyLabel("Copy");
+    }, 1600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copyLabel]);
+
+  const onCopyRoomId = async () => {
+    const normalizedRoomId = roomId.trim().toUpperCase();
+    if (!normalizedRoomId) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(normalizedRoomId);
+      setCopyLabel("Copied");
+    } catch {
+      setCopyLabel("Copy");
+    }
+  };
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -67,7 +96,14 @@ export default function HomePage() {
             />
             <button
               type="button"
-              className="ghost-btn"
+              className="ghost-btn room-action-btn"
+              onClick={onCopyRoomId}
+            >
+              {copyLabel}
+            </button>
+            <button
+              type="button"
+              className="ghost-btn room-action-btn"
               onClick={() => setRoomId(makeRoomId())}
             >
               Random
